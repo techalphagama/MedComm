@@ -124,7 +124,7 @@ afterEvaluate {
 
                 groupId = "com.alpharays.mymedicommfma"
                 artifactId = "mymedicommfma"
-                version = "0.0.1-new-comm-release"
+                version = "0.1.0-release"
             }
         }
     }
