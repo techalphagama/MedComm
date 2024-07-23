@@ -43,7 +43,18 @@ class CommunityApiImpl @Inject constructor(
             }
         }
 
-
+//    override suspend fun getCurrentUserPostsList(docId: String): ResponseResult<MyCommunityPostsParent> =
+//        withContext(Dispatchers.IO) {
+//            return@withContext try {
+//                responseHandler.callAPI {
+//                    withContext(Dispatchers.IO) {
+//                        apiServices.getMyAllPosts(docId)
+//                    }
+//                }
+//            } catch (e: Exception) {
+//                ResponseResult.Error(SOMETHING_WENT_WRONG)
+//            }
+//        }
 
     override suspend fun addNewPost(
         token: String,

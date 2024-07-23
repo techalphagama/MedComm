@@ -46,12 +46,12 @@ fun CommentReplyFullScreen(
     commentsViewModel: CommentsViewModel = hiltViewModel(),
 ) {
     val response by commentsViewModel.allRepliesStateFlow.collectAsStateWithLifecycle()
-    val allCommentsData = response.data?.data
-    LaunchedEffect(commentId) {
-        if(commentId.isNotEmpty()){
-            commentsViewModel.getAllReplies(commentId)
-        }
-    }
+    val allCommentsData = response.data?.data ?: emptyList()
+//    LaunchedEffect(commentId) {
+//        if(commentId.isNotEmpty()){
+//            commentsViewModel.getAllReplies(commentId)
+//        }
+//    }
     val style = TextStyle(
         fontSize = MaterialTheme.typography.bodyLarge.fontSize,
         fontFamily = manRopeFontFamily,

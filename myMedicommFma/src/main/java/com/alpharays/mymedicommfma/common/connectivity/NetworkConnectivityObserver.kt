@@ -3,6 +3,7 @@ package com.alpharays.mymedicommfma.common.connectivity
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -10,14 +11,25 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-class NetworkConnectivityObserver @Inject constructor(context: Context) : ConnectivityObserver {
+class NetworkConnectivityObserver @Inject constructor(
+    context: Context
+): ConnectivityObserver {
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    fun isNetworkAvailable(): Boolean {
+        val nw = connectivityManager.activeNetwork ?: return false
+        val actNw = connectivityManager.getNetworkCapabilities(nw) ?: return false
+        return when {
+            actNw.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+            actNw.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+            actNw.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+//            actNw.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> true
+            else -> false
+        }
+    }
 
     override fun observe(): Flow<ConnectivityObserver.Status> {
         return callbackFlow {
-            val initialStatus = getCurrentNetworkStatus()
-            launch { send(initialStatus) }
-
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     super.onAvailable(network)
@@ -40,20 +52,10 @@ class NetworkConnectivityObserver @Inject constructor(context: Context) : Connec
                 }
             }
 
-            connectivityManager.registerDefaultNetworkCallback(callback)
-            awaitClose {
-                connectivityManager.unregisterNetworkCallback(callback)
-            }
-        }.distinctUntilChanged()
-    }
+            try { connectivityManager.registerDefaultNetworkCallback(callback) }
+            catch (e: Exception) { e.printStackTrace() }
 
-    private fun getCurrentNetworkStatus(): ConnectivityObserver.Status {
-        val activeNetwork = connectivityManager.activeNetwork
-        val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-        return if (networkCapabilities != null) {
-            ConnectivityObserver.Status.Available
-        } else {
-            ConnectivityObserver.Status.Unavailable
-        }
+            awaitClose { connectivityManager.unregisterNetworkCallback(callback) }
+        }.distinctUntilChanged()
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,9 @@ fun CommunityRepostScreen(
     viewModel: CommunityRepostViewModel = hiltViewModel(),
     postSharedViewModel: PostSharedViewModel = hiltViewModel(),
 ) {
+    LaunchedEffect(Unit) {
+        postSharedViewModel.getCurrentPostState()
+    }
     val currentPost by postSharedViewModel.postContentState.collectAsStateWithLifecycle()
     val cardBorderBrush = Brush.linearGradient(colors = listOf(LessFocusedTextColor, OnPrimaryFixed, Color.Transparent, BluishGray, LessFocusedTextColor))
     var myRepostThoughts by rememberSaveable { mutableStateOf("") }

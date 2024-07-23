@@ -92,10 +92,11 @@ dependencies {
     // Compose Lifecycle
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
 
 
     //alaskaGemSdk
-    implementation("com.github.alpharays05:AlaskaSDK:0.0.4")
+    implementation("com.github.techalphagama:alaskasdk:0.1.0-release")
 
     implementation("com.airbnb.android:lottie-compose:6.2.0")
 
@@ -124,7 +125,7 @@ afterEvaluate {
 
                 groupId = "com.alpharays.mymedicommfma"
                 artifactId = "mymedicommfma"
-                version = "0.1.0-release"
+                version = "0.1.1-release"
             }
         }
     }

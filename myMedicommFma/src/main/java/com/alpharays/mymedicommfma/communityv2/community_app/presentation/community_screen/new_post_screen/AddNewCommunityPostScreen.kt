@@ -90,7 +90,8 @@ fun AddNewCommunityPostScreen(
     repostContent : String = "",
     communityViewModel: CommunityViewModel = hiltViewModel(),
 ) {
-    val isInternetAvailable by communityViewModel.networkStatus.collectAsStateWithLifecycle()
+    val isInternetAvailable = ConnectivityObserver.Status.Available
+//    val isInternetAvailable by communityViewModel.networkStatus.collectAsStateWithLifecycle()
     var postTitle by remember { mutableStateOf(repostTitle) }
     var postContent by remember { mutableStateOf(repostContent) }
     val color = Color(0xFFF5F6FF)

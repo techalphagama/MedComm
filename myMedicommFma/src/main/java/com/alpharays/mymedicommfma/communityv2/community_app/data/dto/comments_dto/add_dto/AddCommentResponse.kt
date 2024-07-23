@@ -6,8 +6,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class AddCommentResponse(
-    @SerializedName("allMessages") val newCommentData: String? = null,
+    @SerializedName("data") val data: String? = null,
     @SerializedName("error") val error: String? = null,
-    @SerializedName("errorlist") val errorList: List<String>? = null,
+    @SerializedName("errorlist") val errorlist: List<String>? = null,
     @SerializedName("success") val success: String? = null
 )

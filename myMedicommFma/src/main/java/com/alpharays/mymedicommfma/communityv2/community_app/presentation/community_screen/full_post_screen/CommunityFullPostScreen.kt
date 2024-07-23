@@ -95,12 +95,12 @@ import com.alpharays.mymedicommfma.communityv2.community_app.domain.model.commun
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.CommentsViewModel
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.CommunityViewModel
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.PostSharedViewModel
+import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.AllReactionsPopUp
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.CommunityPostReactionOptions
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.CommunityPostReactions
-import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.ComposablePopReactionsRow
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.ReactionOptions
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.ReactionPainters
-import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.fullPostInitLoad
+import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.all_posts_screen.setupFullScreenView
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.navigation.CommunityAppScreens
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.FocusedTextColor
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.OnPrimaryFixed
@@ -114,16 +114,16 @@ import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.
 @Composable
 fun CommunityFullPostScreen(
     navController: NavController,
-    addComment: Boolean,
     communityViewModel: CommunityViewModel = hiltViewModel(),
     commentsViewModel: CommentsViewModel = hiltViewModel(),
     postSharedViewModel: PostSharedViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(Unit) {
-        commentsViewModel.getAllComments()
-    }
+    val isCommentClicked by commentsViewModel.keyboardPopUp.collectAsStateWithLifecycle()
     val allCommentsResponse by commentsViewModel.allCommentsStateFlow.collectAsStateWithLifecycle()
     val allCommentsData = allCommentsResponse.data
+    LaunchedEffect(Unit) {
+        postSharedViewModel.getCurrentPostState()
+    }
     val currentPost by postSharedViewModel.postContentState.collectAsStateWithLifecycle()
     val cardBorderBrush = Brush.linearGradient(colors = listOf(OnPrimaryFixed, Color.Transparent, Color.Transparent, OnPrimaryFixed))
 
@@ -133,7 +133,7 @@ fun CommunityFullPostScreen(
             CommentsTopBarComposable(navController)
         },
         bottomBar = {
-            CommentsBottomBarComposable(openCommentTextField = addComment, viewModel = commentsViewModel)
+            CommentsBottomBarComposable(openCommentTextField = isCommentClicked, viewModel = commentsViewModel)
         },
         containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .95f)
     ) {
@@ -213,7 +213,6 @@ fun CommentsBottomBarComposable(
     }
     var topPadding by remember { mutableStateOf(0.dp) }
     var verticalAlignment by remember { mutableStateOf(Alignment.CenterVertically) }
-    var addCommentToPost by remember { mutableStateOf(false) }
     val style1 = TextStyle(
         fontSize = MaterialTheme.typography.bodyMedium.fontSize,
         fontFamily = manRopeFontFamily,
@@ -299,26 +298,23 @@ fun CommentsBottomBarComposable(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(MaterialTheme.spacing.medSmall)
-                    .clickable { addCommentToPost = true },
+                    .clickable {
+                        // add new comment and get All updated comments
+                        viewModel.addNewComment(userComment,)
+                        userComment = ""
+                        isFocused = false
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    },
                 style = style2
             )
         }
     }
 
-    if(addCommentToPost) {
-        // add new comment and get All updated comments
-        viewModel.addNewComment(userComment)
-        addCommentToPost = false
-        userComment = ""
-        isFocused = false
-        focusManager.clearFocus()
-        keyboardController?.hide()
-    }
-
     addCommentStatus.data?.success?.let {
         if(it == SUCCESS_CODE){
             LaunchedEffect(Unit) {
-                MedCommToast.showToast(context, addCommentStatus.data?.newCommentData ?: COMMENT_ADDED)
+                MedCommToast.showToast(context, addCommentStatus.data?.data ?: COMMENT_ADDED)
             }
         }
     }
@@ -383,7 +379,7 @@ fun PostComposableContent(
             CommunityFullPostLowerRow(post)
             AnimatedVisibility(visible = communityViewModel != null) {
                 Column {
-                    CommunityFullPostLastRow(
+                    PostFullScreenFooter(
                         context = context,
                         currentPost = post,
                         postSharedViewModel = postSharedViewModel,
@@ -698,7 +694,7 @@ fun CommunityFullPostLowerRow(post: CommunityPost) {
 }
 
 @Composable
-fun CommunityFullPostLastRow(
+fun PostFullScreenFooter(
     context: Context,
     currentPost: CommunityPost,
     isInternetAvailable: ConnectivityObserver.Status = ConnectivityObserver.Status.Available,
@@ -784,11 +780,11 @@ fun CommunityFullPostLastRow(
                                 }
                             }
                             ReactionOptions.COMMENT -> {
-                                // Don't do anything
+
                             }
                             ReactionOptions.REPOST -> {
                                 if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-                                    fullPostInitLoad(postSharedViewModel, currentPost, navController, false, isRepost = true)
+                                    setupFullScreenView(postSharedViewModel, currentPost, navController, false, isRepost = true)
                                 } else {
                                     MedCommToast.showToast(context,
                                         CommunityConstants.CAN_NOT_REPOST_NO_CONNECTION
@@ -818,8 +814,7 @@ fun CommunityFullPostLastRow(
     }
 
     AnimatedVisibility(visible = isReactionsVisible) {
-        ComposablePopReactionsRow(
-            context = context,
+        AllReactionsPopUp(
             pressOffset = pressOffset,
             itemHeight = itemHeight,
             density = density,

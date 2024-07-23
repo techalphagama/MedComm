@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,9 +30,12 @@ import com.alpharays.mymedicommfma.R
 import com.alpharays.mymedicommfma.common.connectivity.ConnectivityObserver
 import com.alpharays.mymedicommfma.communityv2.MedCommRouter
 import com.alpharays.mymedicommfma.communityv2.MedCommRouter.NO_CONNECTION
+import com.alpharays.mymedicommfma.communityv2.MedCommRouter.NO_CONNECTION_MSG
 import com.alpharays.mymedicommfma.communityv2.MedCommRouter.ONE_TIME_POST_ID_KEY
+import com.alpharays.mymedicommfma.communityv2.MedCommRouter.SOMETHING_WENT_WRONG
 import com.alpharays.mymedicommfma.communityv2.MedCommToast
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.community_screen.CommunityViewModel
+import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.spacing
 
 class CommunityUtils {
     companion object {
@@ -75,7 +79,7 @@ class CommunityUtils {
             viewModel: T,
             toShow: Boolean = true,
         ) {
-            var reLoadScreen by remember { mutableStateOf(false) }
+            var reloadScreen by remember { mutableStateOf(false) }
             if (toShow) {
                 val painter = painterResource(id = R.drawable.no_internet)
                 Column(
@@ -91,31 +95,32 @@ class CommunityUtils {
                     )
 
                     Text(
-                        modifier = modifier,
-                        text = MedCommRouter.SOMETHING_WENT_WRONG,
+                        modifier = modifier.padding(top = MaterialTheme.spacing.small),
+                        text = SOMETHING_WENT_WRONG,
                         style = TextStyle(
                             fontSize = 22.sp,
                             fontWeight = FontWeight.W600,
                             textAlign = TextAlign.Center
-                        )
+                        ),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = .87f)
                     )
 
                     Text(
-                        modifier = modifier,
-                        text = MedCommRouter.NO_CONNECTION_MSG,
+                        modifier = modifier.padding(top = MaterialTheme.spacing.extraSmall),
+                        text = NO_CONNECTION_MSG,
                         style = TextStyle(
                             fontSize = 16.sp,
                             fontWeight = FontWeight.W300,
                             textAlign = TextAlign.Center
-                        )
+                        ),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = .5f)
                     )
 
                     OutlinedButton(
                         shape = RoundedCornerShape(12.dp),
-                        modifier = modifier,
-                        onClick = {
-                            reLoadScreen = true
-                        }) {
+                        modifier = modifier.padding(top = MaterialTheme.spacing.small),
+                        onClick = { reloadScreen = true }
+                    ) {
                         Text(
                             text = "Refresh",
                             style = TextStyle(
@@ -129,13 +134,13 @@ class CommunityUtils {
                 }
             }
 
-            if (reLoadScreen) {
+            if (reloadScreen) {
                 if (networkStatus == ConnectivityObserver.Status.Unavailable) {
                     MedCommToast.showToast(context, NO_CONNECTION)
-                    reLoadScreen = false
+                    reloadScreen = false
                     return
                 }
-                ScreenReload(viewModel)
+//                ScreenReload(viewModel) :: NOT NEEDED NOW, as we once network is re-gained, we are already calling the api
             }
         }
 
@@ -144,11 +149,21 @@ class CommunityUtils {
             LaunchedEffect(Unit) {
                 when (viewModel) {
                     is CommunityViewModel -> {
-                        viewModel.refreshCommunityPosts()
+                        viewModel.refresh()
                     }
                 }
             }
         }
+
+//        private lateinit var connectivityObserver: ConnectivityObserver
+//        @Composable
+//        fun isInternetAvailable(context: Context): ConnectivityObserver.Status {
+//            connectivityObserver = NetworkConnectivityObserver(context)
+//            val status by connectivityObserver.observe().collectAsState(
+//                initial = ConnectivityObserver.Status.Unavailable
+//            )
+//            return status
+//        }
 
         fun getMedicoColor(context: Context, color: Int): Int {
             return context.getColor(color)

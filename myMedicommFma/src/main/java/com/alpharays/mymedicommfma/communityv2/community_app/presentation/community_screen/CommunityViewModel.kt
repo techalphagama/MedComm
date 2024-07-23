@@ -26,14 +26,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
 class CommunityViewModel @Inject constructor(
     context: Context,
-    private val networkObserver: NetworkConnectivityObserver,
+    networkObserver: NetworkConnectivityObserver,
     private val communityUseCase: CommunityUseCase,
 ) : ViewModel() {
     private val _allCommunityPostsStateFlow = MutableStateFlow(CommunityAllPostsState())
@@ -46,55 +45,56 @@ class CommunityViewModel @Inject constructor(
     val postReactionStateFlow: StateFlow<PostReactionState> = _postReactionStateFlow.asStateFlow()
 
     private var token = ""
+    private var canHitApi = true
+    private var vmNetworkStatus: ConnectivityObserver.Status? = null
+    val appNetworkStatus = networkObserver.observe()
 
-    private val _networkStatus = MutableStateFlow(ConnectivityObserver.Status.Unavailable)
-    val networkStatus: StateFlow<ConnectivityObserver.Status> = _networkStatus.asStateFlow()
+    private val _isRefreshing = MutableStateFlow<Boolean?>(null)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
-    private val _refreshing = MutableStateFlow(false)
-    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    val currentNetworkStatus = networkObserver.isNetworkAvailable()
 
     init {
         // token may not change during a session (login-logout) - so using init{} else could have used : get()
         token = CommunityUtils.getAuthToken(context)
-        observeNetworkConnectivity()
-    }
-
-    private fun observeNetworkConnectivity() {
-        viewModelScope.launch {
-            networkObserver.observe().collect { status ->
-                if(_networkStatus.value != ConnectivityObserver.Status.Available && status == ConnectivityObserver.Status.Available){
-                    getAllCommunityPosts()
+        appNetworkStatus
+            .onEach {
+                if (it == ConnectivityObserver.Status.Available) {
+                    vmNetworkStatus = it
+                    if (canHitApi) {
+                        getAllCommunityPosts()
+                        canHitApi = false
+                    }
                 }
-                _networkStatus.update { status }
             }
-        }
+            .launchIn(viewModelScope)
     }
 
-    fun refreshCommunityPosts() {
-        if (_networkStatus.value == ConnectivityObserver.Status.Available) {
+    fun refresh () {
+        if (vmNetworkStatus == ConnectivityObserver.Status.Available) {
             getAllCommunityPosts()
         }
     }
 
     private fun getAllCommunityPosts() {
-        println("calling_all_community_posts")
+        println("checking_loading_state")
         communityUseCase(token).onEach { result ->
             when (result) {
                 is ResponseResult.Loading -> {
-                    _refreshing.value = true
+                    _isRefreshing.update { true }
                     val state = CommunityAllPostsState(isLoading = true)
                     _allCommunityPostsStateFlow.update { state }
                 }
 
                 is ResponseResult.Success -> {
-                    _refreshing.value = false
-                    val state = CommunityAllPostsState(data = result.data)
+                    _isRefreshing.update { false }
+                    val state = CommunityAllPostsState(isLoading = false, data = result.data)
                     _allCommunityPostsStateFlow.update { state }
                 }
 
                 is ResponseResult.Error -> {
-                    _refreshing.value = false
-                    val state = CommunityAllPostsState(error = result.message ?: UNEXPECTED_ERROR)
+                    _isRefreshing.update { false }
+                    val state = CommunityAllPostsState(isLoading = false, error = result.message ?: UNEXPECTED_ERROR)
                     _allCommunityPostsStateFlow.update { state }
                 }
             }
@@ -126,14 +126,12 @@ class CommunityViewModel @Inject constructor(
         communityUseCase(token, ReactionBody(postId, reaction.lowercase())).onEach { result ->
             when (result) {
                 is ResponseResult.Loading -> {
-                    _refreshing.update { true }
                     val state = PostReactionState(isLoading = true)
                     _postReactionStateFlow.update { state }
                 }
 
                 is ResponseResult.Success -> {
-                    _refreshing.update { false }
-                    val state = PostReactionState(data = result.data)
+                    val state = PostReactionState(isLoading = false, data = result.data)
                     if(state.data?.success?.toString() == MedCommRouter.SUCCESS_CODE){
                         _allCommunityPostsStateFlow.update {
                             val data = it.data?.allPosts
@@ -243,8 +241,7 @@ class CommunityViewModel @Inject constructor(
                 }
 
                 is ResponseResult.Error -> {
-                    _refreshing.update { false }
-                    val state = PostReactionState(error = result.message ?: UNEXPECTED_ERROR)
+                    val state = PostReactionState(isLoading = false, error = result.message ?: UNEXPECTED_ERROR)
                     _postReactionStateFlow.update { state }
                 }
             }
@@ -253,7 +250,7 @@ class CommunityViewModel @Inject constructor(
 }
 
 data class CommunityAllPostsState(
-    var isLoading: Boolean? = false,
+    var isLoading: Boolean? = null,
     var data: AllCommunityPostsData? = null,
     var error: String? = null,
 )

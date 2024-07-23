@@ -23,10 +23,6 @@ class PostSharedViewModel @Inject constructor(
 
     private val savedReactions = hashMapOf<String, List<ReactionType?>?>()
 
-    init {
-        getCurrentPostState()
-    }
-
     fun setCurrentPostState(post: CommunityPost) {
         savedReactions.clear()
         viewModelScope.launch {
@@ -42,7 +38,7 @@ class PostSharedViewModel @Inject constructor(
             .take(2)
     }
 
-    private fun getCurrentPostState() {
+    fun getCurrentPostState() {
         useCase.getCommunityPost()
             .onEach { result ->
                 result?.reactions?.let { reactions ->

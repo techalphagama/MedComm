@@ -17,7 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,18 +34,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,11 +50,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +72,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
@@ -144,31 +142,49 @@ import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.
 import com.alpharays.mymedicommfma.communityv2.community_app.presentation.theme.workSansFontFamily
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommunityScreen(
     navController: NavController,
     communityViewModel: CommunityViewModel = hiltViewModel(),
     postSharedViewModel: PostSharedViewModel = hiltViewModel()
 ) {
+    // drawerState remember variable
     val drawerState: DrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val isInternetAvailable by communityViewModel.networkStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val refreshing by communityViewModel.refreshing.collectAsStateWithLifecycle()
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = refreshing,
-        onRefresh = {
-            if (isInternetAvailable != ConnectivityObserver.Status.Available) {
-                MedCommToast.showToast(context, NO_CONNECTION)
+    val pullRefreshState = rememberPullToRefreshState()
+
+    val isRefreshing by communityViewModel.isRefreshing.collectAsStateWithLifecycle()
+
+    // check if pullRefresh is refreshing or not - on each refresh, hit the api if network status is available
+    LaunchedEffect(pullRefreshState.isRefreshing) {
+        if (pullRefreshState.isRefreshing && isRefreshing == false) {
+            communityViewModel.refresh()
+        }
+    }
+
+    LaunchedEffect(isRefreshing) {
+        isRefreshing?.let {
+            if (it) {
+                pullRefreshState.startRefresh()
             }
-            else{
-                communityViewModel.refreshCommunityPosts()
+            else  {
+                pullRefreshState.endRefresh()
             }
         }
-    )
+    }
 
-    val allCommunityPostsResponse by communityViewModel.allCommunityPostsStateFlow.collectAsStateWithLifecycle()
-    val communityPostsList = allCommunityPostsResponse.data?.allPosts
+    // collect all the community posts
+    val allPostsState by communityViewModel.allCommunityPostsStateFlow.collectAsStateWithLifecycle()
+    val communityPostsList = allPostsState.data?.allPosts ?: emptyList()
+
+    // collect network status
+    val networkStatus by communityViewModel.appNetworkStatus.collectAsState(
+        /**
+         * does not matter what we set as initial network status - not atleast in our usecase
+         */
+        initial = if (communityViewModel.currentNetworkStatus) ConnectivityObserver.Status.Available else ConnectivityObserver.Status.Unavailable
+    )
 
     ModalNavigationDrawer(
         modifier = Modifier,
@@ -177,6 +193,7 @@ fun CommunityScreen(
             Scaffold(
                 modifier = Modifier
                     .navigationBarsPadding()
+                    .imePadding()
                     .fillMaxSize(),
                 topBar = {
                     CustomTopAppBar(drawerState = drawerState, showLogo = true, navController = navController)
@@ -185,18 +202,21 @@ fun CommunityScreen(
             ) { innerPadding ->
                 Box(
                     modifier = Modifier
-                        .pullRefresh(pullRefreshState)
                         .padding(innerPadding)
                         .fillMaxSize()
+                        .nestedScroll(pullRefreshState.nestedScrollConnection)
                 ) {
                     ComposableCommunityPosts(
                         navController = navController,
-                        isInternetAvailable = isInternetAvailable,
+                        networkStatus = networkStatus,
                         communityViewModel = communityViewModel,
                         postSharedViewModel = postSharedViewModel,
                         communityPostsList = communityPostsList
                     )
-                    PullRefreshIndicator(refreshing, pullRefreshState, Modifier.align(Alignment.TopCenter))
+                    PullToRefreshContainer(
+                        state = pullRefreshState,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
                 }
             }
         },
@@ -214,13 +234,14 @@ fun CommunityScreen(
 @Composable
 fun ComposableCommunityPosts(
     navController: NavController,
-    isInternetAvailable: ConnectivityObserver.Status,
-    communityPostsList: List<CommunityPost>?,
+    networkStatus: ConnectivityObserver.Status,
+    communityPostsList: List<CommunityPost>,
     communityViewModel: CommunityViewModel,
     postSharedViewModel: PostSharedViewModel,
 ) {
     val context = LocalContext.current
     val cardBorderBrush = Brush.sweepGradient(colors = listOf(BluishGray, Color.Transparent, BluishGray, Color.Transparent))
+//    val cardBorderBrush = Brush.linearGradient(colors = listOf(BluishGray, Color.Transparent, Color.Transparent, BluishGray))
 
     Box(
         modifier = Modifier
@@ -231,145 +252,123 @@ fun ComposableCommunityPosts(
             ),
         contentAlignment = Alignment.TopCenter
     ) {
-        communityPostsList?.let {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                itemsIndexed(communityPostsList) { index, post ->
-                    Column(
-                        modifier = Modifier.padding(bottom = MaterialTheme.spacing.small),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                        horizontalAlignment = Alignment.CenterHorizontally
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            itemsIndexed(communityPostsList) { index, currentPost ->
+                Column(
+                    modifier = Modifier.padding(bottom = MaterialTheme.spacing.small),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = MaterialTheme.spacing.extraSmall)
+                            .border(
+                                1.dp,
+                                cardBorderBrush,
+                                RoundedCornerShape(MaterialTheme.size.small)
+                            ),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)
+                        ),
+                        shape = RoundedCornerShape(MaterialTheme.size.small)
                     ) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = MaterialTheme.spacing.extraSmall)
-                                .border(
-                                    1.dp,
-                                    cardBorderBrush,
-                                    RoundedCornerShape(MaterialTheme.size.small)
-                                ),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)),
-                            shape = RoundedCornerShape(MaterialTheme.size.small)
+                        Column(
+                            modifier = Modifier.padding(MaterialTheme.spacing.extraSmall),
+                            verticalArrangement = Arrangement.SpaceBetween,
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                modifier = Modifier.padding(MaterialTheme.spacing.extraSmall),
-                                verticalArrangement = Arrangement.SpaceBetween,
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                ComposableCommunityPostUpperRow(context = context, post = post)
+                            PostHeader(
+                                context = context,
+                                posterName = currentPost.posterName ?: "",
+                                aboutPoster = currentPost.aboutDoc ?: "",
+                                onFollow = {}
+                            )
 
-                                ComposableCommunityPostContent(
-                                    context = context,
-                                    post = post,
-                                    viewModel = postSharedViewModel,
-                                    navController = navController,
-                                    isInternetAvailable = isInternetAvailable
-                                )
+                            PostBody(
+                                context = context,
+                                currentPost = currentPost,
+                                viewModel = postSharedViewModel,
+                                navController = navController,
+                                networkStatus = networkStatus
+                            )
 
-                                ComposableCommunityPostLowerRow(
-                                    context = context,
-                                    post = post,
-                                    navController = navController,
-                                    viewModel = postSharedViewModel,
-                                    isInternetAvailable = isInternetAvailable
-                                )
+                            PostCommentsFooter(
+                                currentPost = currentPost,
+                                navController = navController,
+                                viewModel = postSharedViewModel
+                            )
 
-                                ComposableCommunityPostLastRow(
-                                    context = context,
-                                    viewModel = communityViewModel,
-                                    navController = navController,
-                                    postSharedViewModel = postSharedViewModel,
-                                    isInternetAvailable = isInternetAvailable,
-                                    currentPost = post,
-                                )
-                            }
-                        }
-
-                        AnimatedVisibility(visible = index != communityPostsList.size - 1) {
-                            HorizontalDivider(
-                                modifier = Modifier
-                                    .padding(horizontal = MaterialTheme.spacing.extraSmall)
-                                    .clip(RoundedCornerShape(MaterialTheme.spacing.avgExtraSmall)),
-                                thickness = MaterialTheme.spacing.avgExtraSmall,
-                                color = OnSurfaceHighEmphasis.copy(alpha = .2f)
+                            PostFooter(
+                                context = context,
+                                viewModel = communityViewModel,
+                                navController = navController,
+                                postSharedViewModel = postSharedViewModel,
+                                networkStatus = networkStatus,
+                                currentPost = currentPost,
                             )
                         }
+                    }
+
+                    AnimatedVisibility(visible = index != communityPostsList.size - 1) {
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .padding(horizontal = MaterialTheme.spacing.extraSmall)
+                                .clip(RoundedCornerShape(MaterialTheme.spacing.avgExtraSmall)),
+                            thickness = MaterialTheme.spacing.avgExtraSmall,
+                            color = OnSurfaceHighEmphasis.copy(alpha = .2f)
+                        )
                     }
                 }
             }
         }
 
-        val isVisible = isInternetAvailable == ConnectivityObserver.Status.Available
-        if(communityPostsList != null && communityPostsList.isEmpty() && isVisible){
-            LaunchedEffect(Unit){
-                MedCommToast.showToast(context, "No posts found")
-            }
-        }
-
-        AnimatedVisibility(visible = isInternetAvailable == ConnectivityObserver.Status.Unavailable) {
+        AnimatedVisibility(visible = networkStatus == ConnectivityObserver.Status.Unavailable) {
             ComposableNoNetworkFound(
                 context = context,
-                networkStatus = isInternetAvailable,
+                networkStatus = networkStatus,
                 modifier = Modifier,
                 viewModel = communityViewModel
             )
         }
 
-        AnimatedVisibility(visible = isInternetAvailable == ConnectivityObserver.Status.Lost) {
-            LaunchedEffect(Unit) {
+        LaunchedEffect(key1 = networkStatus) {
+            if (networkStatus == ConnectivityObserver.Status.Lost) {
                 MedCommToast.showToast(context, NO_CONNECTION)
             }
         }
 
-        AnimatedVisibility(
-            visible = !communityPostsList.isNullOrEmpty(),
+        Icon(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(MaterialTheme.spacing.small)
-        ) {
-//            Column(
-//                modifier = Modifier
-//                    .padding(5.dp)
-//                    .clickable {
-//                        navController.navigate(CommunityAppScreens.AddNewCommunityPostScreen.route) {
-//                            launchSingleTop = true
-//                        }
-//                    },
-//                horizontalAlignment = Alignment.CenterHorizontally
-//            ) {
-//                val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.add_new_appointment))
-//                LottieAnimation(
-//                    modifier = Modifier.size(MaterialTheme.size.large2),
-//                    composition = composition,
-//                    iterations = 1,
-//                    speed = 0.5f,
-//                    contentScale = ContentScale.Fit
-//                )
-//            }
-            Icon(
-                modifier = Modifier
-                    .size(MaterialTheme.size.large2)
-                    .background(
-                        Primary100.copy(alpha = .5f),
-                        RoundedCornerShape(MaterialTheme.spacing.medSmall)
-                    )
-                    .clip(RoundedCornerShape(MaterialTheme.spacing.medSmall))
-                    .border(0.5.dp, Color.Black, RoundedCornerShape(MaterialTheme.spacing.medSmall))
-                    .clickable {
-                        navController.navigate(CommunityAppScreens.AddNewCommunityPostScreen.route) {
-                            launchSingleTop = true
-                        }
-                    },
-                imageVector = Icons.Default.Add,
-                contentDescription = "Add new community post",
-                tint = Color.Blue
-            )
-        }
+                .size(MaterialTheme.size.large2)
+                .background(
+                    Primary100.copy(alpha = .5f),
+                    RoundedCornerShape(MaterialTheme.spacing.medSmall)
+                )
+                .clip(RoundedCornerShape(MaterialTheme.spacing.medSmall))
+                .border(0.5.dp, Color.Black, RoundedCornerShape(MaterialTheme.spacing.medSmall))
+                .clickable {
+                    navController.navigate(CommunityAppScreens.AddNewCommunityPostScreen.route) {
+                        // TODO: handle nav backstack in whole app : NO IDEA, how to deal with backstack in JP
+                        launchSingleTop = true
+                    }
+                },
+            imageVector = Icons.Default.Add,
+            contentDescription = "Add new community currentPost",
+            tint = Color.Blue
+        )
     }
 }
 
 @Composable
-fun ComposableCommunityPostUpperRow(context: Context, post: CommunityPost) {
+fun PostHeader(
+    context: Context,
+    posterName: String,
+    aboutPoster: String,
+    onFollow: () -> Unit
+) {
     val style1 = TextStyle(
         fontSize = MaterialTheme.typography.bodyMedium.fontSize,
         fontFamily = manRopeFontFamily,
@@ -405,13 +404,13 @@ fun ComposableCommunityPostUpperRow(context: Context, post: CommunityPost) {
         ) {
             Text(
                 modifier = Modifier.padding(MaterialTheme.spacing.extraSmall),
-                text = post.posterName ?: "--",
+                text = posterName,
                 style = style1
             )
 
             Text(
                 modifier = Modifier.padding(start = MaterialTheme.spacing.extraSmall),
-                text = post.aboutDoc ?: "--",
+                text = aboutPoster,
                 maxLines = 1,
                 style = style2
             )
@@ -420,6 +419,7 @@ fun ComposableCommunityPostUpperRow(context: Context, post: CommunityPost) {
         Row(
             verticalAlignment = Alignment.Top,
             modifier = Modifier.clickable {
+                onFollow()
                 MedCommToast.showToast(context, "Coming Soon...")
             }
         ) {
@@ -440,17 +440,17 @@ fun ComposableCommunityPostUpperRow(context: Context, post: CommunityPost) {
 }
 
 @Composable
-fun ComposableCommunityPostContent(
+fun PostBody(
     context: Context,
-    post: CommunityPost,
+    currentPost: CommunityPost,
     viewModel: PostSharedViewModel,
-    navController: NavController? = null,
-    isInternetAvailable: ConnectivityObserver.Status = ConnectivityObserver.Status.Available,
+    navController: NavController?,
+    networkStatus: ConnectivityObserver.Status,
 ) {
     val color = CommunityUtils.getMedicoColor(context, R.color.bluish_gray)
-    val interactionSource by remember { mutableStateOf(MutableInteractionSource()) }
-    val ripple = rememberRipple(bounded = false, radius = 0.dp, color = Color(color))
-    val style1 = TextStyle(
+//    val interactionSource by remember { mutableStateOf(MutableInteractionSource()) }
+//    val ripple = rememberRipple(bounded = false, radius = 0.dp, color = Color(color))
+    val style = TextStyle(
         fontSize = MaterialTheme.typography.bodyMedium.fontSize,
         fontFamily = manRopeFontFamily,
         fontWeight = FontWeight.Bold,
@@ -463,7 +463,6 @@ fun ComposableCommunityPostContent(
         fontWeight = FontWeight.W400,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.87f)
     )
-
     val annotationSpanStyle = SpanStyle(
         color = Primary600,
         fontWeight = FontWeight.Medium,
@@ -471,12 +470,12 @@ fun ComposableCommunityPostContent(
         fontFamily = manRopeFontFamily
     )
 
-    val lengthCondition = (post.postContent?.length ?: 0) > DEFAULT_POST_BODY_LIMIT
+    val lengthCondition = (currentPost.postContent?.length ?: 0) > DEFAULT_POST_BODY_LIMIT
     var showFullPost by remember { mutableStateOf(!lengthCondition) }
     var readMore by remember {
         mutableStateOf(if (lengthCondition) READ_FULL_POST else EMPTY)
     }
-    val string = if (showFullPost) post.postContent else post.postContent?.take(70)
+    val string = if (showFullPost) currentPost.postContent else currentPost.postContent?.take(70)
     val annotatedText = buildAnnotatedString {
         withStyle(style = bodySpanStyle) {
             append(string)
@@ -493,11 +492,8 @@ fun ComposableCommunityPostContent(
             .pointerInput(true) {
                 detectTapGestures(
                     onTap = {
-                        if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-//                            viewModel.removeAllPosts() -> NO NEED TO EXPLICITLY REMOVE AND THEN ADD - merge and combine
-//                            viewModel.setCurrentPostState(post) // stored current clicked post in datastore
-//                            navController?.navigate(CommunityAppScreens.CommunityFullPostScreen.route + "/${post.postId}" + "/false")
-                            fullPostInitLoad(viewModel, post, navController, false)
+                        if (networkStatus == ConnectivityObserver.Status.Available) {
+                            setupFullScreenView(viewModel, currentPost, navController, false)
                         } else {
                             MedCommToast.showToast(context, NO_CONNECTION)
                         }
@@ -516,8 +512,8 @@ fun ComposableCommunityPostContent(
     ) {
         Column(modifier = Modifier.padding(MaterialTheme.spacing.avgSmall)) {
             Text(
-                text = post.postTitle ?: "--",
-                style = style1
+                text = currentPost.postTitle ?: "--",
+                style = style
             )
             ClickableText(
                 modifier = Modifier.padding(top = MaterialTheme.spacing.medium),
@@ -528,11 +524,8 @@ fun ComposableCommunityPostContent(
                         readMore = ""
                     }
                     else{
-                        if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-//                            viewModel.removeAllPosts()
-//                            viewModel.setCurrentPostState(post) // stored current clicked post in datastore
-//                            navController?.navigate(CommunityAppScreens.CommunityFullPostScreen.route + "/${post.postId}" + "/false")
-                            fullPostInitLoad(viewModel, post, navController, false)
+                        if (networkStatus == ConnectivityObserver.Status.Available) {
+                            setupFullScreenView(viewModel, currentPost, navController, false)
                         } else {
                             MedCommToast.showToast(context, NO_CONNECTION)
                         }
@@ -544,24 +537,15 @@ fun ComposableCommunityPostContent(
 }
 
 @Composable
-fun ComposableCommunityPostLowerRow(
-    context: Context,
-    post: CommunityPost,
+fun PostCommentsFooter(
+    currentPost: CommunityPost,
     navController: NavController,
-    viewModel: PostSharedViewModel,
-    isInternetAvailable: ConnectivityObserver.Status
+    viewModel: PostSharedViewModel
 ) {
-    val reactionsCount = post.reactions?.let { reactions ->
-        listOf(
-            reactions.like,
-            reactions.love,
-            reactions.celebrate,
-            reactions.support,
-            reactions.insightful,
-            reactions.funny
-        ).sumOf { it?.size ?: 0 }
+    val reactionsCount = currentPost.reactions?.run {
+        listOf(like, love, celebrate, support, insightful, funny).sumOf { it?.size ?: 0 }
     } ?: 0
-    val commentsCount = post.comments?.size
+    val commentsCount = currentPost.comments?.size
     val style = TextStyle(
         fontSize = MaterialTheme.typography.bodySmall.fontSize,
         fontFamily = manRopeFontFamily,
@@ -581,14 +565,12 @@ fun ComposableCommunityPostLowerRow(
         ) {
             AnimatedVisibility(visible = reactionsCount != 0) {
                 ClickableTextNavigateToFullScreen(
-                    context = context,
                     text = "$reactionsCount Reactions",
                     style = style,
-                    currentPost = post,
+                    currentPost = currentPost,
                     navController = navController,
                     isComment = false,
                     viewModel = viewModel,
-                    isInternetAvailable = isInternetAvailable,
                 )
             }
 
@@ -596,14 +578,12 @@ fun ComposableCommunityPostLowerRow(
 
             AnimatedVisibility(visible = commentsCount != 0) {
                 ClickableTextNavigateToFullScreen(
-                    context = context,
                     text = "$commentsCount Comments",
                     style = style,
-                    currentPost = post,
+                    currentPost = currentPost,
                     navController = navController,
                     isComment = true,
                     viewModel = viewModel,
-                    isInternetAvailable = isInternetAvailable
                 )
             }
         }
@@ -612,36 +592,31 @@ fun ComposableCommunityPostLowerRow(
 
 @Composable
 fun ClickableTextNavigateToFullScreen(
-    context: Context,
     text: String,
     style: TextStyle,
     currentPost: CommunityPost,
     navController: NavController,
     isComment: Boolean,
     viewModel: PostSharedViewModel,
-    isInternetAvailable: ConnectivityObserver.Status,
 ) {
     ClickableText(
         text = AnnotatedString(text),
         style = style,
         onClick = {
-            if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-                fullPostInitLoad(viewModel, currentPost, navController, isComment)
-            } else {
-                MedCommToast.showToast(context, NO_CONNECTION)
-            }
+            setupFullScreenView(viewModel, currentPost, navController, isComment)
         }
     )
 }
 
-fun fullPostInitLoad(
+fun setupFullScreenView(
     viewModel: PostSharedViewModel,
     currentPost: CommunityPost,
     navController: NavController?,
     isComment: Boolean,
     isRepost: Boolean = false,
 ) {
-    viewModel.setCurrentPostState(currentPost) // store current clicked post in datastore
+    // TODO: if no connection, then user is not able to go to full screen view of currentPost - fix it later
+    viewModel.setCurrentPostState(currentPost) // store current clicked currentPost in datastore
     val route = if(!isRepost) {
         CommunityAppScreens.CommunityFullPostScreen.route + "/${currentPost.postId}" + "/$isComment"
     }
@@ -652,48 +627,51 @@ fun fullPostInitLoad(
 }
 
 @Composable
-fun ComposableCommunityPostLastRow(
+fun PostFooter(
     context: Context,
     currentPost: CommunityPost,
-    isInternetAvailable: ConnectivityObserver.Status = ConnectivityObserver.Status.Available,
+    networkStatus: ConnectivityObserver.Status = ConnectivityObserver.Status.Available,
     showCommentsAgain: Boolean = true,
     navController: NavController,
     viewModel: CommunityViewModel,
     postSharedViewModel: PostSharedViewModel
 ) {
-//    var postLiked by remember { mutableStateOf(false) }
-    var likePainterId by remember {
-        val myReaction = currentPost.myReaction
-        val painterId = when(myReaction?.reaction){
-            ReactionPainters.Like.getLowercaseName() -> { R.drawable.like_reaction }
-            ReactionPainters.Love.getLowercaseName() -> { R.drawable.love_reaction }
-            ReactionPainters.Support.getLowercaseName() -> { R.drawable.support_reaction }
-            ReactionPainters.Celebrate.getLowercaseName() -> { R.drawable.celebrate_reaction }
-            ReactionPainters.Funny.getLowercaseName() -> { R.drawable.funny_reaction }
-            ReactionPainters.Insightful.getLowercaseName() -> { R.drawable.insightful_reaction }
-            else -> { R.drawable.not_liked }
+    val userCurrentReaction = currentPost.myReaction
+    var (currentPainterId, painterIdText) = when (userCurrentReaction?.reaction) {
+        ReactionPainters.Like.getLowercaseName() -> {
+            Pair(ReactionPainters.Like.getReactionPainterId(), LIKE_OPTION)
         }
-        mutableIntStateOf(painterId)
-    }
-    var painterIdText by remember {
-        val myReaction = currentPost.myReaction
-        val reactionText = when(myReaction?.reaction){
-            ReactionPainters.Like.getLowercaseName() -> { LIKE_OPTION }
-            ReactionPainters.Love.getLowercaseName() -> { LOVE_OPTION }
-            ReactionPainters.Support.getLowercaseName() -> { SUPPORT_OPTION }
-            ReactionPainters.Celebrate.getLowercaseName() -> { CELEBRATE_OPTION }
-            ReactionPainters.Funny.getLowercaseName() -> { FUNNY_OPTION }
-            ReactionPainters.Insightful.getLowercaseName() -> { INSIGHTFUL_OPTION }
-            else -> { LIKE_OPTION }
+
+        ReactionPainters.Love.getLowercaseName() -> {
+            Pair(ReactionPainters.Love.getReactionPainterId(), LOVE_OPTION)
         }
-        mutableStateOf(reactionText)
+
+        ReactionPainters.Support.getLowercaseName() -> {
+            Pair(ReactionPainters.Support.getReactionPainterId(), SUPPORT_OPTION)
+        }
+
+        ReactionPainters.Celebrate.getLowercaseName() -> {
+            Pair(ReactionPainters.Celebrate.getReactionPainterId(), CELEBRATE_OPTION)
+        }
+
+        ReactionPainters.Funny.getLowercaseName() -> {
+            Pair(ReactionPainters.Funny.getReactionPainterId(), FUNNY_OPTION)
+        }
+
+        ReactionPainters.Insightful.getLowercaseName() -> {
+            Pair(ReactionPainters.Insightful.getReactionPainterId(), INSIGHTFUL_OPTION)
+        }
+
+        else -> {
+            Pair(R.drawable.not_liked, LIKE_OPTION)
+        }
     }
-    val likePainter = painterResource(id = likePainterId)
+    val likePainter = painterResource(id = currentPainterId)
     val commentPainter = painterResource(id = R.drawable.comment)
     val repostPainter = painterResource(id = R.drawable.repost)
     val sendPainter = painterResource(id = R.drawable.send)
     var pressOffset by remember { mutableStateOf(IntOffset.Zero) }
-    var isReactionsVisible by remember { mutableStateOf(false) }
+    var showAllReactions by remember { mutableStateOf(false) }
     var itemHeight by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
     val style = TextStyle(
@@ -704,11 +682,15 @@ fun ComposableCommunityPostLastRow(
         textAlign = TextAlign.Start
     )
 
-    val reactionsLazyList : ArrayList<CommunityPostReactions> = ArrayList()
-    reactionsLazyList.add(CommunityPostReactions(likePainter, LIKE_PAINTER_CONTENT_DSC, painterIdText, style, ReactionOptions.LIKE))
-    reactionsLazyList.add(CommunityPostReactions(commentPainter, COMMENT_PAINTER_CONTENT_DSC, COMMENT_OPTION, style, ReactionOptions.COMMENT))
-    reactionsLazyList.add(CommunityPostReactions(repostPainter, REPOST_PAINTER_CONTENT_DSC, REPOST_OPTION, style, ReactionOptions.REPOST))
-    reactionsLazyList.add(CommunityPostReactions(sendPainter, SEND_PAINTER_CONTENT_DSC, SEND_OPTION, style, ReactionOptions.SEND))
+    val reactionsLazyList by remember {
+        val initialList = listOf(
+            CommunityPostReactions(likePainter, LIKE_PAINTER_CONTENT_DSC, painterIdText, style, ReactionOptions.LIKE),
+            CommunityPostReactions(commentPainter, COMMENT_PAINTER_CONTENT_DSC, COMMENT_OPTION, style, ReactionOptions.COMMENT),
+            CommunityPostReactions(repostPainter, REPOST_PAINTER_CONTENT_DSC, REPOST_OPTION, style, ReactionOptions.REPOST),
+            CommunityPostReactions(sendPainter, SEND_PAINTER_CONTENT_DSC, SEND_OPTION, style, ReactionOptions.SEND)
+        )
+        mutableStateOf(initialList)
+    }
 
     Column(
         modifier = Modifier
@@ -720,7 +702,11 @@ fun ComposableCommunityPostLastRow(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         HorizontalDivider(
-            modifier = Modifier.padding(start = MaterialTheme.spacing.small, end = MaterialTheme.spacing.small, bottom = MaterialTheme.spacing.extraSmall),
+            modifier = Modifier.padding(
+                start = MaterialTheme.spacing.small,
+                end = MaterialTheme.spacing.small,
+                bottom = MaterialTheme.spacing.extraSmall
+            ),
             color = MaterialTheme.colorScheme.surface.copy(alpha = .08f)
         )
         Row(
@@ -733,21 +719,22 @@ fun ComposableCommunityPostLastRow(
             reactionsLazyList.forEach{ item ->
                 CommunityPostReactionOptions(
                     modifier = Modifier.weight(1f),
-                    style = item.style.copy(fontWeight = if(likePainterId != R.drawable.not_liked && item.reactionOptions == ReactionOptions.LIKE) FontWeight.Bold else style.fontWeight),
+                    style = item.style.copy(fontWeight = if(currentPainterId != R.drawable.not_liked && item.reactionOptions == ReactionOptions.LIKE) FontWeight.Bold else style.fontWeight),
                     painter = if(item.reactionOptions == ReactionOptions.LIKE) likePainter else item.painter,
                     contentDescription = item.cd,
                     imageText = item.imageText,
                     onSingleTap = { offSet ->
-                        when(item.reactionOptions){
+                        when(item.reactionOptions) {
                             ReactionOptions.LIKE -> {
-                                if (isInternetAvailable == ConnectivityObserver.Status.Available) {
+                                if (networkStatus == ConnectivityObserver.Status.Available) {
                                     val prevLikePainterId = R.drawable.not_liked
-                                    likePainterId = if(likePainterId == prevLikePainterId){
+                                    currentPainterId = if(currentPainterId == prevLikePainterId) {
                                         R.drawable.like_reaction
-                                    } else{
+                                    }
+                                    else {
                                         R.drawable.not_liked
                                     }
-                                    val isLiked = likePainterId == R.drawable.like_reaction
+                                    val isLiked = currentPainterId == R.drawable.like_reaction
                                     painterIdText = LIKE_OPTION
                                     viewModel.updatePostReaction(currentPost.postId, if(isLiked) LIKE_OPTION else "NULL")
                                 } else {
@@ -755,25 +742,24 @@ fun ComposableCommunityPostLastRow(
                                 }
                             }
                             ReactionOptions.COMMENT -> {
-                                if (isInternetAvailable == ConnectivityObserver.Status.Available) {
+                                if (networkStatus == ConnectivityObserver.Status.Available) {
                                     if (showCommentsAgain) {
-                                        fullPostInitLoad(postSharedViewModel, currentPost, navController, true)
-//                                        navController.navigate(CommunityAppScreens.CommunityFullPostScreen.route + "/$currentPostId" + "/true")
+                                        setupFullScreenView(postSharedViewModel, currentPost, navController, true)
                                     }
                                 } else {
                                     MedCommToast.showToast(context, CAN_NOT_COMMENT_NO_CONNECTION)
                                 }
                             }
                             ReactionOptions.REPOST -> {
-                                if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-                                    fullPostInitLoad(postSharedViewModel, currentPost, navController, false, isRepost = true)
+                                if (networkStatus == ConnectivityObserver.Status.Available) {
+                                    setupFullScreenView(postSharedViewModel, currentPost, navController, false, isRepost = true)
                                 } else {
                                     MedCommToast.showToast(context, CAN_NOT_REPOST_NO_CONNECTION)
                                 }
                             }
                             ReactionOptions.SEND -> {
-                                if (isInternetAvailable == ConnectivityObserver.Status.Available) {
-                                    // TODO:
+                                if (networkStatus == ConnectivityObserver.Status.Available) {
+                                    MedCommToast.showToast(context, "Coming soon...")
                                 } else {
                                     MedCommToast.showToast(context, CAN_NOT_SEND_NO_CONNECTION)
                                 }
@@ -781,8 +767,8 @@ fun ComposableCommunityPostLastRow(
                         }
                     },
                     onLongPress = { offSet ->
-                        if(item.reactionOptions == ReactionOptions.LIKE){
-                            isReactionsVisible = true
+                        if(item.reactionOptions == ReactionOptions.LIKE) {
+                            showAllReactions = true
                             pressOffset = IntOffset(offSet.x.toInt(), offSet.y.toInt())
                         }
                     }
@@ -791,15 +777,14 @@ fun ComposableCommunityPostLastRow(
         }
     }
 
-    AnimatedVisibility(visible = isReactionsVisible) {
-        ComposablePopReactionsRow(
-            context = context,
+    AnimatedVisibility(visible = showAllReactions) {
+        AllReactionsPopUp(
             pressOffset = pressOffset,
             itemHeight = itemHeight,
             density = density,
-            onDismiss = { isReactionsVisible = false },
+            onDismiss = { showAllReactions = false },
             onReactionSelected = { reactionText, reactionTextPainter ->
-                likePainterId = reactionTextPainter
+                currentPainterId = reactionTextPainter
                 painterIdText = reactionText
                 viewModel.updatePostReaction(currentPost.postId, reactionText)
             }
@@ -952,8 +937,7 @@ enum class ReactionPainters(private val drawableId: Int, private val painterName
 }
 
 @Composable
-fun ComposablePopReactionsRow(
-    context: Context,
+fun AllReactionsPopUp(
     pressOffset: IntOffset,
     itemHeight: Dp,
     density: Density,
@@ -961,13 +945,13 @@ fun ComposablePopReactionsRow(
     onDismiss: () -> Unit,
 ) {
     val reactionPainters = ReactionPainters.entries
-    val borderColor = Color(0xFFCECECE)
-    val shape = RoundedCornerShape(MaterialTheme.spacing.small)
-    val marginAboveIcon = MaterialTheme.size.large2
+//    val borderColor = Color(0xFFCECECE)
+//    val shape = RoundedCornerShape(MaterialTheme.spacing.small)
+//    val marginAboveIcon = MaterialTheme.size.large2
     val itemHeightPx = with(density) { itemHeight.roundToPx() }
-    val marginAboveIconPx = with(density) { marginAboveIcon.roundToPx() }
+//    val marginAboveIconPx = with(density) { marginAboveIcon.roundToPx() }
     val yOffset = pressOffset.y + itemHeightPx //+ marginAboveIconPx
-    val cardBorderBrush = Brush.sweepGradient(colors = listOf(BluishGray, Color.Transparent, BluishGray, Color.Transparent))
+//    val cardBorderBrush = Brush.sweepGradient(colors = listOf(BluishGray, Color.Transparent, BluishGray, Color.Transparent))
 
     Popup(
         onDismissRequest = onDismiss,
@@ -1002,7 +986,6 @@ fun ComposablePopReactionsRow(
                     AnimatedVisibilityWithDelay(
                         painterId = painterId.getReactionPainterId(),
                         index = index,
-                        context = context,
                         onComplete = {
                             onReactionSelected(painterId.getReactionPainterName(), painterId.getReactionPainterId())
                             onDismiss()
@@ -1019,7 +1002,6 @@ fun ComposablePopReactionsRow(
 fun AnimatedVisibilityWithDelay(
     painterId: Int,
     index: Int,
-    context: Context,
     onComplete: () -> Unit
 ) {
     // Define animation specs for enter animation
@@ -1028,7 +1010,7 @@ fun AnimatedVisibilityWithDelay(
 
     // Use AnimatedVisibility for each image
     var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(targetValue = if (isPressed) 1.5f else 1f)
+    val scale by animateFloatAsState(targetValue = if (isPressed) 1.5f else 1f, label = "")
 
     LaunchedEffect(key1 = Unit) {
         delay(index * 3L) // Staggered delay, adjust the multiplier as needed

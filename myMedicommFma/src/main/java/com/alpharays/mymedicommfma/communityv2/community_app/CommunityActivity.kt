@@ -18,7 +18,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class CommunityActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        DependencyProvider.provideImpl(communityFeatureApi = CommunityFeatureImpl())
+        DependencyProvider.provideImpl(communityFeatureApi = CommunityFeatureImpl(this))
         setContent {
             CommunityTheme {
                 WindowCompat.setDecorFitsSystemWindows(window, true)
